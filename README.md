@@ -4,7 +4,6 @@ A personal brain that remembers everyone you meet, why they matter to your goals
 
 Built for Battle of the Personal Brains (2026-09-21) with Cognee, Bright Data, AWS Strands Agents, and Docker Sandboxes.
 
-**Disclosure:** the setup, the core modules, and the UI were written before the 4 p.m. kickoff. The git history shows what was built when.
 
 ## How it works
 
