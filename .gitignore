@@ -1,0 +1,8 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+.cognee_system/
+.data_storage/
+data/private/
+data/feeds/

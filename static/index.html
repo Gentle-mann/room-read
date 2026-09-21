@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Room Read</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1c1b19; --mute:#6b6862; --line:#e4e1da; --accent:#3a5bd9; --good:#1f8a4c; --warn:#b4541a; --chip:#eef0fb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141413; --card:#1e1d1b; --ink:#f1efe9; --mute:#a19d94; --line:#34322e; --accent:#8aa2ff; --good:#5fcf8f; --warn:#f0a36b; --chip:#262a3d; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:var(--bg); border-bottom:1px solid var(--line); padding:12px 16px; }
+  header h1 { margin:0; font-size:19px; letter-spacing:-.01em; }
+  header .sub { color:var(--mute); font-size:13px; margin-top:2px; }
+  main { max-width:760px; margin:0 auto; padding:12px 16px 80px; }
+  section { margin:18px 0; }
+  h2 { font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); margin:0 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:10px; }
+  textarea { width:100%; min-height:92px; font:inherit; padding:12px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--ink); resize:vertical; }
+  button { font:inherit; font-size:14px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:999px; padding:8px 14px; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .chip { display:inline-block; font-size:12px; padding:2px 8px; border-radius:999px; background:var(--chip); color:var(--accent); margin-right:4px; }
+  .src { font-size:11px; color:var(--mute); border:1px solid var(--line); border-radius:6px; padding:0 5px; margin-left:4px; white-space:nowrap; }
+  .name { font-weight:650; font-size:17px; }
+  .mute { color:var(--mute); font-size:13px; }
+  .draft { white-space:pre-wrap; background:var(--bg); border:1px dashed var(--line); border-radius:10px; padding:10px; font-size:14px; margin:8px 0; }
+  .overdue { color:var(--warn); font-weight:600; }
+  .kept { color:var(--good); }
+  ul.reasons { margin:8px 0; padding-left:18px; }
+  .links a { color:var(--accent); font-size:13px; margin-right:10px; text-decoration:none; }
+  .log div { font-size:13px; padding:4px 0; border-bottom:1px solid var(--line); }
+  .log time { color:var(--mute); font-variant-numeric:tabular-nums; margin-right:6px; }
+  .status { min-height:20px; font-size:13px; color:var(--mute); margin-top:6px; }
+  .q button { display:block; width:100%; text-align:left; border-radius:12px; margin:6px 0; padding:10px 12px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:8px; }
+  .stat { font-size:28px; font-weight:700; letter-spacing:-.02em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Room Read</h1>
+  <div class="sub" id="sub">Loading…</div>
+</header>
+<main>
+  <section>
+    <h2>Just met someone?</h2>
+    <textarea id="debrief" placeholder="Talk for 20 seconds. Tap the mic on your keyboard. e.g. “Just met Priya, she builds voice agents for clinics, I promised to send her the StylesGo API doc tomorrow.”"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" id="save">Remember</button>
+      <span class="mute">No chat. It acts on what you tell it.</span>
+    </div>
+    <div class="status" id="status"></div>
+    <div id="question"></div>
+  </section>
+
+  <section id="changed-sec" hidden>
+    <h2>Something changed</h2>
+    <div id="changed"></div>
+  </section>
+
+  <section>
+    <h2>People you met</h2>
+    <div id="people"><div class="mute">Nobody yet tonight.</div></div>
+  </section>
+
+  <section id="plan-sec" hidden>
+    <h2>Your picks for tonight</h2>
+    <div id="plan"></div>
+  </section>
+
+  <section>
+    <h2>Promises</h2>
+    <div id="promises"><div class="mute">No open promises.</div></div>
+  </section>
+
+  <section>
+    <h2>What it did on its own</h2>
+    <div class="card log" id="log"></div>
+  </section>
+
+  <section>
+    <h2>Controls</h2>
+    <div class="row">
+      <button data-act="/api/setup">Load brain</button>
+      <button data-act="/api/breakdown">Pick who to meet</button>
+      <button data-act="/api/watch">Check for changes</button>
+      <button data-act="/api/morning">Next-morning drafts</button>
+      <button data-act="/api/midnight">Fast-forward to midnight</button>
+      <a href="/api/graph" target="_blank"><button>Open graph</button></a>
+    </div>
+    <div class="mute" style="margin-top:8px">Midnight also runs on its own. Drafts are never sent.</div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let lastLog = "";
+
+async function api(path, body) {
+  const r = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!r.ok) throw new Error((await r.text()).slice(0, 200));
+  return r.json();
+}
+
+function until(iso) {
+  const ms = new Date(iso) - new Date();
+  const h = Math.round(Math.abs(ms) / 36e5 * 10) / 10;
+  return ms < 0 ? `<span class="overdue">overdue by ${h}h</span>` : `due in ${h}h`;
+}
+
+function links(l) { return Object.entries(l || {}).map(([k, v]) => `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(k)}</a>`).join(""); }
+
+function copyBtn(text) { return `<button onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(text)}')); this.textContent='Copied'">Copy</button>`; }
+
+function renderPeople(people) {
+  const tonight = people.filter((p) => p.card);
+  if (!tonight.length) return;
+  $("people").innerHTML = tonight.map((p) => {
+    const c = p.card, prof = p.profile;
+    return `<div class="card">
+      <div class="row"><span class="name">${esc(p.name)}</span><span class="chip">${esc(c.kind)}</span></div>
+      <div class="mute">${esc(c.headline)}</div>
+      <div class="links">${links(p.links)}</div>
+      <ul class="reasons">${c.why_it_matters.map((r) => `<li>${esc(r.point)}<span class="src">${esc(r.source)}</span></li>`).join("")}</ul>
+      ${prof ? `<div class="mute">Web: ${esc(prof.headline || "")}${prof.current_company ? " · " + esc(prof.current_company) : ""} <span class="src">Bright Data, ${esc((prof.retrieved_at || "").slice(11, 16))}</span></div>` : ""}
+      <div class="draft">${esc(c.follow_up)}</div>
+      <div class="row">${copyBtn(c.follow_up)}<button onclick="forget('${p.id}', '${esc(p.name)}')">Forget ${esc(p.name.split(" ")[0])}</button></div>
+    </div>`;
+  }).join("");
+}
+
+function renderPromises(promises) {
+  const open = promises.filter((p) => p.status === "open");
+  const done = promises.filter((p) => p.status !== "open").slice(0, 3);
+  if (!open.length && !done.length) return;
+  $("promises").innerHTML = open.map((p) => `<div class="card row" style="justify-content:space-between">
+      <div><b>${esc(p.text)}</b><div class="mute">to ${esc(p.person_name)} · ${until(p.due_at)}</div></div>
+      <button onclick="closePromise('${p.id}')">Kept</button></div>`).join("")
+    + done.map((p) => `<div class="mute kept">✓ ${esc(p.text)} (${esc(p.status)})</div>`).join("");
+}
+
+function renderPlan(b) {
+  if (!b) return;
+  $("plan-sec").hidden = false;
+  const groups = ["can help you", "you can help", "same wavelength", "say hello"];
+  $("plan").innerHTML = groups.map((g) => {
+    const picks = b.picks.filter((p) => p.group === g);
+    if (!picks.length) return "";
+    return `<div class="card"><div class="chip">${esc(g)}</div>${picks.map((p) => `<div style="margin-top:8px"><b>${esc(p.name)}</b>${p.enough_info ? "" : '<span class="src">thin profile</span>'}<div class="mute">${esc(p.why)}</div><div class="mute">Opener: ${esc(p.opener)}</div></div>`).join("")}</div>`;
+  }).join("");
+}
+
+function renderChanged(w) {
+  if (!w) return;
+  $("changed-sec").hidden = false;
+  const stats = `<div class="grid">
+    <div class="card"><div class="stat">${w.new_postings}</div><div class="mute">new postings since ${esc(w.since)}</div></div>
+    <div class="card"><div class="stat">${w.people_checked}</div><div class="mute">people in memory checked</div></div>
+    <div class="card"><div class="stat">${w.paths.length}</div><div class="mute">worth your time</div></div></div>`;
+  const paths = w.paths.map((p) => `<div class="card">
+      <div class="row"><span class="name">${esc(p.person_name)}</span><span class="chip">warm path</span></div>
+      <div style="margin-top:8px"><b>What changed:</b> ${esc(p.why_now)}</div>
+      <div><b>Connection:</b> ${esc(p.connection)}</div>
+      <div><b>Your story:</b> ${esc(p.story_match)}</div>
+      <div><b>The right ask:</b> ${esc(p.ask)}</div>
+      <div class="draft">${esc(p.draft)}</div>
+      <div class="row">${copyBtn(p.draft)}<span class="mute">Draft only. Never sent.</span></div></div>`).join("");
+  $("changed").innerHTML = stats + (paths || `<div class="mute">${esc(w.notes || "Nothing worth interrupting you for.")}</div>`);
+}
+
+function renderLog(log) {
+  const html = log.map((l) => `<div><time>${esc(l.at.slice(11, 16))}</time>${esc(l.text)}</div>`).join("") || '<div class="mute">Nothing yet.</div>';
+  if (html !== lastLog) { $("log").innerHTML = html; lastLog = html; }
+}
+
+async function refresh() {
+  try {
+    const s = await api("/api/state");
+    const forgot = s.event.room_forgotten_at ? " · room forgotten" : "";
+    $("sub").textContent = `${s.event.name} · ${s.event.room_size} in the room · ${s.met_tonight} met tonight${forgot}${s.scout_ready ? "" : " · web lookups off"}`;
+    renderPeople(s.people); renderPromises(s.promises); renderPlan(s.breakdown); renderChanged(s.watch); renderLog(s.log);
+  } catch (e) { $("sub").textContent = "Server not reachable"; }
+}
+
+function askWhich(res) {
+  const q = res.questions[0];
+  $("question").innerHTML = `<div class="card q"><b>Which ${esc(q.mention)}?</b>
+    ${q.candidates.map((c) => `<button onclick="pick('${res.debrief_id}', '${esc(q.mention)}', '${c.id}')">${esc(c.name)}<div class="mute">${esc(c.bio || "No bio on Luma")}</div></button>`).join("")}
+    <button onclick="pick('${res.debrief_id}', '${esc(q.mention)}', null)">None of these</button></div>`;
+}
+
+async function handle(res) {
+  if (res.status === "question") { askWhich(res); $("status").textContent = "One question before I save this."; return; }
+  $("question").innerHTML = ""; $("status").textContent = `Remembered ${res.cards.map((c) => c.person.name).join(", ")}.`;
+  $("debrief").value = ""; refresh();
+}
+
+window.pick = async (did, mention, gid) => { $("status").textContent = "Saving…"; handle(await api("/api/resolve", { debrief_id: did, mention, guest_id: gid })); };
+window.forget = async (pid, name) => { if (!confirm(`Forget ${name} completely?`)) return; await api(`/api/forget/${pid}`, {}); refresh(); };
+window.closePromise = async (pid) => { await api(`/api/promise/${pid}/kept`, {}); refresh(); };
+
+$("save").onclick = async () => {
+  const text = $("debrief").value.trim();
+  if (!text) return;
+  $("save").disabled = true; $("status").textContent = "Remembering…";
+  try { await handle(await api("/api/debrief", { text })); } catch (e) { $("status").textContent = "Error: " + e.message; }
+  $("save").disabled = false;
+};
+
+document.querySelectorAll("[data-act]").forEach((b) => b.onclick = async () => {
+  b.disabled = true; const label = b.textContent; b.textContent = "Working…";
+  try { await api(b.dataset.act, {}); } catch (e) { alert(e.message); }
+  b.textContent = label; b.disabled = false; refresh();
+});
+
+refresh(); setInterval(refresh, 4000);
+</script>
+</body>
+</html>
