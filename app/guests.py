@@ -2,6 +2,7 @@
 
 import json
 import unicodedata
+from difflib import SequenceMatcher
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -128,4 +129,13 @@ def resolve(mention: str, guests: list[Guest]) -> Resolution:
         return Resolution("unique", mention, pool)
     if pool:
         return Resolution("ambiguous", mention, pool[:8])
+    # Fuzzy fallback for speech-to-text spellings ("Vasilij Markovich" → "Vasilije Markovic").
+    def close(a: str, b: str) -> bool:
+        return SequenceMatcher(None, a, b).ratio() >= 0.8
+
+    fuzzy = [g for g in guests if all(any(close(t, nt) for nt in norm(g.name).split()) for t in tokens)]
+    if len(fuzzy) == 1:
+        return Resolution("unique", mention, fuzzy)
+    if fuzzy:
+        return Resolution("ambiguous", mention, fuzzy[:8])
     return Resolution("none", mention, [])

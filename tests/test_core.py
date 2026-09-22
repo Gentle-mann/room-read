@@ -82,3 +82,11 @@ def test_ledger_promises_and_forget(tmp_path):
     assert led.promises("open") == []
     led.delete_person(pid)
     assert led.people() == [] and led.promises() == []
+
+
+def test_fuzzy_match_for_speech_spellings(tmp_path):
+    room = make_room(tmp_path)
+    assert resolve("Vasilij Markovich", room).matches[0].name == "Vasilije Markovic"
+    assert resolve("Priya Natarajen", room).matches[0].name == "Priya Natarajan"
+    assert resolve("Kieran", room).status == "ambiguous"  # sounds like the three Kirans: ask, don't guess
+    assert resolve("Zelda", room).status == "none"

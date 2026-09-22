@@ -9,7 +9,7 @@ import re
 import uuid
 from datetime import datetime, timedelta
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -215,6 +215,38 @@ async def finalize(did: str):
         cards.append({"person": LED.person(pid), "card": card.model_dump(), "interaction_id": iid})
     log("debrief", f"Debrief processed: {', '.join(c['person']['name'] for c in cards)}.")
     return {"status": "done", "cards": cards}
+
+
+# ---------- voice: the mic next to the debrief box ----------
+def name_hints() -> str:
+    """Names worth spelling right: people met, tonight's picks, hosts. Biases transcription toward the room."""
+    names = [p["name"] for p in LED.people()] + HOSTS
+    names += [p["name"] for p in (LED.get("breakdown") or {}).get("picks", [])]
+    seen = list(dict.fromkeys(n for n in names if n))[:40]
+    terms = "Cognee, Bright Data, Strands, AWS, Docker, StylesGo, Minerva, Room Read"
+    return f"Networking notes at {EVENT_NAME}. Terms: {terms}. Names that may come up: " + ", ".join(seen) + "."
+
+
+@app.post("/api/transcribe")
+async def transcribe(audio: UploadFile = File(...)):
+    """Speech to text for a spoken debrief, using OpenAI's transcription model."""
+    if not os.getenv("OPENAI_API_KEY"):
+        raise HTTPException(501, "no OpenAI key for transcription; use your keyboard's mic")
+    from openai import AsyncOpenAI
+
+    data = await audio.read()
+    if len(data) < 800:
+        raise HTTPException(400, "recording too short")
+    ext = {"audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/mpeg": "mp3", "audio/x-m4a": "m4a"}
+    kind = (audio.content_type or "audio/webm").split(";")[0]
+    client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    res = await client.audio.transcriptions.create(
+        model=os.getenv("TRANSCRIBE_MODEL", "gpt-4o-transcribe"),
+        file=(f"debrief.{ext.get(kind, 'webm')}", data, kind),
+        prompt=name_hints(),
+    )
+    log("voice", f"Transcribed a {len(data) // 1024} KB voice note.")
+    return {"text": res.text.strip()}
 
 
 # ---------- setup: load me, backfill, room ----------

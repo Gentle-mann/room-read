@@ -36,6 +36,10 @@
   .q button { display:block; width:100%; text-align:left; border-radius:12px; margin:6px 0; padding:10px 12px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:8px; }
   .stat { font-size:28px; font-weight:700; letter-spacing:-.02em; }
+  .mic { display:inline-flex; align-items:center; gap:6px; }
+  .mic svg { width:16px; height:16px; }
+  .mic.rec { background:#d33; border-color:#d33; color:#fff; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity:.7; } }
 </style>
 </head>
 <body>
@@ -46,10 +50,11 @@
 <main>
   <section>
     <h2>Just met someone?</h2>
-    <textarea id="debrief" placeholder="Talk for 20 seconds. Tap the mic on your keyboard. e.g. “Just met Priya, she builds voice agents for clinics, I promised to send her the StylesGo API doc tomorrow.”"></textarea>
+    <textarea id="debrief" placeholder="Tap Speak and talk for 20 seconds, or type. e.g. “Just met Priya, she builds voice agents for clinics, I promised to send her the StylesGo API doc tomorrow.”"></textarea>
     <div class="row" style="margin-top:8px">
-      <button class="primary" id="save">Remember</button>
-      <span class="mute">No chat. It acts on what you tell it.</span>
+      <button class="mic primary" id="mic" title="Speak your debrief"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg><span id="miclabel">Speak</span></button>
+      <button id="save">Remember</button>
+      <span class="mute">Tap Speak, talk, tap Stop. It remembers on its own.</span>
     </div>
     <div class="status" id="status"></div>
     <div id="question"></div>
@@ -203,13 +208,46 @@ window.pick = async (did, mention, gid, iid) => { $("status").textContent = "Res
 window.forget = async (pid, name) => { if (!confirm(`Forget ${name} completely?`)) return; await api(`/api/forget/${pid}`, {}); refresh(); };
 window.closePromise = async (pid) => { await api(`/api/promise/${pid}/kept`, {}); refresh(); };
 
-$("save").onclick = async () => {
+// ---- mic: record, transcribe on the server, then remember automatically ----
+let rec = null, chunks = [], started = 0, ticker = null;
+async function startRec() {
+  if (!navigator.mediaDevices?.getUserMedia) { $("status").textContent = "This browser can't record here. Use your keyboard's mic (needs https or localhost)."; return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { $("status").textContent = "Microphone blocked. Allow mic access for this page, or use your keyboard's mic."; return; }
+  const type = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((t) => window.MediaRecorder?.isTypeSupported?.(t)) || "";
+  rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined); chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  rec.onstop = () => { stream.getTracks().forEach((t) => t.stop()); sendAudio(new Blob(chunks, { type: rec.mimeType || "audio/webm" })); };
+  rec.start(); started = Date.now();
+  $("mic").classList.add("rec");
+  ticker = setInterval(() => { $("miclabel").textContent = `Stop ${Math.round((Date.now() - started) / 1000)}s`; }, 250);
+  $("status").textContent = "Listening… tap Stop when you're done.";
+}
+async function sendAudio(blob) {
+  clearInterval(ticker); $("mic").classList.remove("rec"); $("miclabel").textContent = "Speak"; $("mic").disabled = true;
+  $("status").textContent = "Transcribing…";
+  try {
+    const fd = new FormData(); fd.append("audio", blob, "debrief");
+    const r = await fetch("/api/transcribe", { method: "POST", body: fd });
+    if (!r.ok) throw new Error((await r.text()).slice(0, 160));
+    const { text } = await r.json();
+    if (!text) throw new Error("heard nothing");
+    $("debrief").value = text;
+    await remember();
+  } catch (e) { $("status").textContent = "Couldn't transcribe: " + e.message; }
+  $("mic").disabled = false;
+}
+$("mic").onclick = () => (rec && rec.state === "recording" ? rec.stop() : startRec());
+
+async function remember() {
   const text = $("debrief").value.trim();
   if (!text) return;
-  $("save").disabled = true; $("status").textContent = "The debrief agent is working…";
+  $("save").disabled = true; $("status").textContent = `Heard: “${text.slice(0, 80)}${text.length > 80 ? "…" : ""}” The debrief agent is working…`;
   try { await handle(await api("/api/debrief", { text })); } catch (e) { $("status").textContent = "Error: " + e.message; }
   $("save").disabled = false;
-};
+}
+$("save").onclick = remember;
 
 document.querySelectorAll("[data-act]").forEach((b) => b.onclick = async () => {
   b.disabled = true; const label = b.textContent; b.textContent = "Working…";
