@@ -409,6 +409,7 @@ def stage_mask(payload: dict) -> dict:
     """Rewrite every full name to "First L." except people who agreed to be on stage and the hosts."""
     allowed = {n.strip().lower() for n in os.getenv("STAGE_OK", "").split(",") if n.strip()} | {h.lower() for h in HOSTS}
     names = {p["name"] for p in LED.people()} | {p["name"] for p in (LED.get("breakdown") or {}).get("picks", [])}
+    names |= {g.name for g in STATE["guests"]}
     text = json.dumps(payload, ensure_ascii=False)
     for full in sorted(names, key=len, reverse=True):
         parts = full.split()
@@ -450,9 +451,12 @@ async def graph(dataset: str = "people"):
 
 
 @app.get("/api/map")
-async def relationship_map(cognee: int = 0, stage: int = 0):
-    """Nodes and labeled edges for the map page; ?cognee=1 overlays what Cognee extracted."""
+async def relationship_map(cognee: int = 0, stage: int = 0, room: int = 0):
+    """Nodes and labeled edges for the map page; ?cognee=1 overlays what Cognee extracted, ?room=1 adds everyone registered."""
     m = mapview.build(LED, LED.get("watch"))
+    if room:
+        met = {p["guest_id"]: p["id"] for p in LED.people() if p.get("guest_id")}
+        mapview.add_room_layer(m, STATE["guests"], (LED.get("breakdown") or {}).get("picks", []), met)
     facts, error = 0, None
     if cognee:
         try:

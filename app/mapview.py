@@ -148,3 +148,31 @@ async def add_cognee_layer(m: MapBuilder, limit: int = 120) -> int:
         if a in idmap and b in idmap and idmap[a] != idmap[b]:
             m.edge(idmap[a], idmap[b], _humanize(rel), "cognee", "Relationship Cognee extracted from your memory.")
     return added
+
+
+def add_room_layer(m: MapBuilder, guests: list, picks: list[dict], met_guest_ids: dict[str, str]) -> int:
+    """Everyone registered tonight, around one hub. Guests you met reuse their person dot; picks are highlighted.
+    Guest data is only what they published on Luma, and the whole layer disappears when the room is forgotten."""
+    if not guests:
+        return 0
+    hub = m.node("event:tonight", f"{EVENT_NAME} (tonight)", "event",
+                 {"kind": "Tonight's event", "text": f"{len(guests)} people registered. The guest list is temporary: at midnight, everyone you didn't meet is forgotten."})
+    m.edge("me", hub, "you're here", "first-hand", "You're registered and in the room.")
+    pick_by_id = {p["guest_id"]: p for p in picks}
+    for g in guests:
+        pid = met_guest_ids.get(g.id)
+        if pid:
+            m.edge(pid, hub, "met here", "first-hand", "You debriefed them tonight.")
+            continue
+        pick = pick_by_id.get(g.id)
+        nid = m.node(f"guest:{g.id}", g.name, "room-pick" if pick else ("host" if g.role == "host" else "room"), {
+            "kind": "Host" if g.role == "host" else ("Suggested for you tonight" if pick else "In the room tonight (not met yet)"),
+            "text": (f"Luma bio: {g.bio}" if g.bio else "No bio on Luma."),
+            "why": [pick["why"], f"Opener: {pick['opener']}"] if pick else [],
+            "links": g.links,
+            "note": "From the Luma guest list. Forgotten at midnight unless you meet them.",
+        })
+        m.edge(nid, hub, "registered", "luma", "From tonight's Luma guest list (only what they published).")
+        if pick:
+            m.edge("me", nid, f"suggested: {pick['group']}", "suggested", pick["why"])
+    return len(guests)

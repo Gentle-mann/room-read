@@ -48,6 +48,9 @@
   <label><input type="checkbox" id="t-promise" checked> Promises</label>
   <label><input type="checkbox" id="t-posting" checked> New postings</label>
   <label><input type="checkbox" id="t-cognee"> What Cognee extracted</label>
+  <label><input type="checkbox" id="t-room"> Everyone in the room</label>
+  <input id="find" list="names" placeholder="Find someone…" style="font:inherit;font-size:13px;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)">
+  <datalist id="names"></datalist>
   <button id="fit">Fit to screen</button>
 </div>
 <div class="wrap">
@@ -73,6 +76,10 @@ const GROUPS = {
   "promise-done":{ color: "#9a968e", label: "Promise kept", size: 12 },
   "posting":     { color: "#d33a3a", label: "New job posting", size: 16 },
   "cognee":      { color: "#2a9d9d", label: "Fact Cognee extracted", size: 9 },
+  "event":       { color: "#c9a227", label: "Tonight's event", size: 20 },
+  "host":        { color: "#c9a227", label: "Host", size: 12 },
+  "room-pick":   { color: "#7ea6ff", label: "Suggested for you tonight", size: 11 },
+  "room":        { color: "#b8b4ab", label: "In the room, not met yet", size: 6 },
 };
 const SOURCES = {
   "first-hand": { label: "You heard it yourself", color: "#3a5bd9", dashes: false, width: 2.5 },
@@ -81,6 +88,8 @@ const SOURCES = {
   "feed":       { label: "Public job feed", color: "#d33a3a", dashes: [6, 4], width: 1.5 },
   "warm":       { label: "Warm path: a reason to reach out", color: "#d33a3a", dashes: false, width: 4 },
   "cognee":     { label: "Cognee's extracted relationship", color: "#9a968e", dashes: false, width: 1 },
+  "suggested":  { label: "Suggested pick for tonight", color: "#7ea6ff", dashes: [2, 4], width: 1.5 },
+  "luma":       { label: "On tonight's guest list (Luma)", color: "#d6d2c8", dashes: false, width: 0.5 },
 };
 const ink = dark ? "#f1efe9" : "#1c1b19";
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -95,9 +104,12 @@ async function load() {
   const withCognee = document.getElementById("t-cognee").checked;
   document.getElementById("stats").textContent = withCognee ? "Loading Cognee's facts…" : "";
   const stage = new URLSearchParams(location.search).get("stage") === "1";
-  data = await (await fetch(`/api/map?cognee=${withCognee ? 1 : 0}&stage=${stage ? 1 : 0}`)).json();
+  const withRoom = document.getElementById("t-room").checked;
+  data = await (await fetch(`/api/map?cognee=${withCognee ? 1 : 0}&stage=${stage ? 1 : 0}&room=${withRoom ? 1 : 0}`)).json();
+  document.getElementById("names").innerHTML = data.nodes.filter((n) => n.group !== "cognee").map((n) => `<option value="${esc(n.label)}">`).join("");
   const people = data.nodes.filter((n) => n.group.startsWith("met")).length;
-  document.getElementById("stats").textContent = `${people} people · ${data.edges.length} connections` + (withCognee ? ` · ${data.cognee_facts} facts from Cognee` : "") + (data.error ? ` · ${data.error}` : "");
+  const inRoom = data.nodes.filter((n) => n.group.startsWith("room") || n.group === "host").length;
+  document.getElementById("stats").textContent = `${people} people you met · ${data.edges.length} connections` + (withRoom ? ` · ${inRoom} more in the room` : "") + (withCognee ? ` · ${data.cognee_facts} facts from Cognee` : "") + (data.error ? ` · ${data.error}` : "");
   draw();
 }
 
@@ -114,7 +126,8 @@ function draw() {
   const shown = new Set(data.nodes.filter(visible).map((n) => n.id));
   nodesDS = new vis.DataSet(data.nodes.filter((n) => shown.has(n.id)).map((n) => {
     const g = GROUPS[n.group] || GROUPS.cognee;
-    return { id: n.id, label: n.label, color: { background: g.color, border: g.color, highlight: { background: g.color, border: ink } },
+    const quiet = n.group === "room";
+    return { id: n.id, label: quiet ? undefined : n.label, title: n.label, color: { background: g.color, border: g.color, highlight: { background: g.color, border: ink } },
              size: g.size, shape: "dot", font: { color: n.group === "you" ? ink : ink, size: n.group === "cognee" ? 11 : 14, strokeWidth: 3, strokeColor: dark ? "#1e1d1b" : "#ffffff" } };
   }));
   edgesDS = new vis.DataSet(data.edges.filter((e) => shown.has(e.from) && shown.has(e.to)).map((e, i) => {
@@ -128,6 +141,7 @@ function draw() {
   if (network) network.destroy();
   network = new vis.Network(document.getElementById("net"), { nodes: nodesDS, edges: edgesDS }, opts);
   network.once("stabilizationIterationsDone", () => network.fit({ animation: false }));
+  network.once("stabilized", () => network.fit({ animation: { duration: 400 } }));  // re-fit once big layers settle
   network.on("click", (p) => {
     if (p.nodes.length) showNode(p.nodes[0]);
     else if (p.edges.length) showEdge(p.edges[0]);
@@ -152,6 +166,7 @@ function showNode(id) {
   if (d.live) rows.push(`<div class="empty">✓ ${esc(d.live)}</div>`);
   const draft = d.follow_up || d.draft;
   if (draft) rows.push(`<div class="k" style="margin-top:8px">Draft (never sent)</div><div class="draft">${esc(draft)}</div>`);
+  if (d.note) rows.push(`<div class="empty">${esc(d.note)}</div>`);
   if (d.links) rows.push(`<div>${Object.entries(d.links).map(([k, v]) => `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(k)}</a>`).join(" · ")}</div>`);
   document.getElementById("detail").innerHTML = `<div class="k">${esc(d.kind || n.group)}</div><div class="t">${esc(n.label)}</div>${rows.join("")}
     <div class="k" style="margin-top:10px">Connections</div>${conns || '<div class="empty">None shown</div>'}`;
@@ -167,6 +182,11 @@ function shownEdge(e) { return nodesDS.get(e.from) && nodesDS.get(e.to); }
 
 ["t-company", "t-promise", "t-posting"].forEach((id) => document.getElementById(id).onchange = draw);
 document.getElementById("t-cognee").onchange = load;
+document.getElementById("t-room").onchange = load;
+document.getElementById("find").onchange = (e) => {
+  const n = data.nodes.find((x) => x.label.toLowerCase() === e.target.value.toLowerCase());
+  if (n && nodesDS.get(n.id)) { network.selectNodes([n.id]); network.focus(n.id, { scale: 1.3, animation: true }); showNode(n.id); }
+};
 document.getElementById("fit").onclick = () => network && network.fit({ animation: true });
 load();
 </script>
