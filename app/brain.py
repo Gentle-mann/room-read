@@ -52,7 +52,7 @@ async def extract_debrief(text: str) -> Debrief:
 # ---------- person card ----------
 class Reason(BaseModel):
     point: str
-    source: Literal["tonight", "my notes", "their Luma profile", "web lookup"]
+    source: Literal["tonight", "memory", "my notes", "their Luma profile", "web lookup"]
 
 
 class Card(BaseModel):
@@ -124,7 +124,7 @@ class WarmPaths(BaseModel):
     notes: str = Field(description="What was checked and why nothing else qualified")
 
 
-def warm_path_agent(ledger, posting_companies: list[str]) -> Agent:
+def warm_path_agent(ledger, posting_companies: list[str], hooks: list | None = None) -> Agent:
     wanted = {c.lower() for c in posting_companies}
 
     @tool
@@ -156,6 +156,7 @@ def warm_path_agent(ledger, posting_companies: list[str]) -> Agent:
         model=make_model(2500),
         callback_handler=None,
         tools=[people_connected_to, what_i_remember, my_goals_and_stories],
+        hooks=hooks or [],
         system_prompt=(
             "You watch for changes that create a reason to reach out. For each new posting, find people I have actually met who "
             "work or worked at that company, check what we talked about, and decide whether there is a real, honest reason to reach out. "
@@ -164,8 +165,8 @@ def warm_path_agent(ledger, posting_companies: list[str]) -> Agent:
     )
 
 
-async def find_warm_paths(ledger, postings: list[dict]) -> WarmPaths:
-    agent = warm_path_agent(ledger, [p["company"] for p in postings])
+async def find_warm_paths(ledger, postings: list[dict], hooks: list | None = None) -> WarmPaths:
+    agent = warm_path_agent(ledger, [p["company"] for p in postings], hooks)
     prompt = "<untrusted>NEW POSTINGS:\n" + json.dumps(postings, ensure_ascii=False)[:12000] + "</untrusted>\nFind warm paths."
     res = await agent.invoke_async(prompt, structured_output_model=WarmPaths)
     return res.structured_output

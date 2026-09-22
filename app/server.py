@@ -4,6 +4,7 @@ Run:  .venv/bin/uvicorn app.server:app --host 0.0.0.0 --port 8765
 """
 
 import asyncio
+import os
 import re
 import uuid
 from datetime import datetime, timedelta
@@ -12,15 +13,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app import brain, feed, memory, scout
+from app import brain, debrief_agent, feed, memory, scout
 from app.config import EVENT_ID, EVENT_NAME, FEEDS, GUESTS_DIR, HOSTS, PRIVATE, ROOM_DATASET, ROOT, now
+from app.guard import Audit, Guardrail
 from app.guests import Guest, load_guests, resolve
 from app.ledger import Ledger
 
 app = FastAPI(title="Room Read")
 LED = Ledger(PRIVATE / "ledger.db")
 STATE = {"guests": load_guests(GUESTS_DIR, HOSTS)}
-PENDING: dict[str, dict] = {}  # debrief_id -> {"text", "debrief", "questions", "resolved"}
+PENDING: dict[str, dict] = {}  # pipeline mode: debrief_id -> {"text", "debrief", "questions", "resolved"}
+AGENTS: dict[str, dict] = {}  # agent mode: debrief_id -> {"agent", "run", "questions", "answers"}
+DEBRIEF_MODE = os.getenv("DEBRIEF_MODE", "agent")  # "pipeline" = the fixed-step fallback
 WRITE_LOCK = asyncio.Lock()  # serialize Cognee writes
 LOG: list[dict] = []  # what the agent did on its own, newest first
 
@@ -70,7 +74,15 @@ async def web_lookup(pid: str, name: str, linkedin_url: str | None, hint: str = 
     await remember_person(pid, [doc], f"{name}'s web profile")
 
 
-# ---------- debrief pipeline ----------
+def background(kind: str, **kw):
+    """Schedule slow work the agent's tools asked for, so the card comes back fast."""
+    if kind == "remember":
+        asyncio.create_task(remember_person(kw["pid"], kw["docs"], kw["label"]))
+    elif kind == "lookup":
+        asyncio.create_task(web_lookup(kw["pid"], kw["name"], kw.get("linkedin"), kw.get("hint", "")))
+
+
+# ---------- debrief ----------
 class DebriefIn(BaseModel):
     text: str
 
@@ -79,12 +91,21 @@ class ResolveIn(BaseModel):
     debrief_id: str
     mention: str
     guest_id: str | None = None  # None = "not on the guest list"
+    interrupt_id: str | None = None  # agent mode: which paused question this answers
 
 
 @app.post("/api/debrief")
 async def post_debrief(body: DebriefIn):
     if not body.text.strip():
         raise HTTPException(400, "empty debrief")
+    if DEBRIEF_MODE == "agent":
+        did = f"db-{uuid.uuid4().hex[:6]}"
+        run = debrief_agent.DebriefRun(text=body.text, ledger=LED, guests=lambda: STATE["guests"], log=log, background=background)
+        agent = debrief_agent.build_agent(run)
+        AGENTS[did] = {"agent": agent, "run": run, "questions": [], "answers": {}}
+        log("debrief", "Debrief agent started.")
+        res = await agent.invoke_async(body.text, structured_output_model=debrief_agent.DebriefOutcome)
+        return await agent_step(did, res)
     d = await brain.extract_debrief(body.text)
     did = f"db-{uuid.uuid4().hex[:6]}"
     questions, resolved = [], {}
@@ -105,6 +126,18 @@ async def post_debrief(body: DebriefIn):
 
 @app.post("/api/resolve")
 async def post_resolve(body: ResolveIn):
+    if body.debrief_id in AGENTS:
+        a = AGENTS[body.debrief_id]
+        iid = body.interrupt_id or next((q["interrupt_id"] for q in a["questions"] if q["mention"] == body.mention), None)
+        a["answers"][iid] = body.guest_id or "none"
+        remaining = [q for q in a["questions"] if q["interrupt_id"] not in a["answers"]]
+        if remaining:
+            return {"status": "question", "debrief_id": body.debrief_id, "questions": remaining}
+        responses = [{"interruptResponse": {"interruptId": k, "response": v}} for k, v in a["answers"].items()]
+        a["questions"], a["answers"] = [], {}
+        log("resolve", "You answered; the debrief agent resumed.")
+        res = await a["agent"].invoke_async(responses, structured_output_model=debrief_agent.DebriefOutcome)
+        return await agent_step(body.debrief_id, res)
     p = PENDING.get(body.debrief_id) or {}
     if not p:
         raise HTTPException(404, "unknown debrief")
@@ -113,6 +146,27 @@ async def post_resolve(body: ResolveIn):
     if p["questions"]:
         return {"status": "question", "debrief_id": body.debrief_id, "questions": p["questions"]}
     return await finalize(body.debrief_id)
+
+
+async def agent_step(did: str, res):
+    """Either surface the agent's paused questions, or store its cards."""
+    a = AGENTS[did]
+    if res.stop_reason == "interrupt":
+        a["questions"] = debrief_agent.questions(res)
+        log("resolve", f"Debrief agent paused to ask: which {', '.join(q['mention'] for q in a['questions'])}?")
+        return {"status": "question", "debrief_id": did, "questions": a["questions"]}
+    AGENTS.pop(did)
+    run, outcome = a["run"], res.structured_output
+    cards = []
+    for po in outcome.people:
+        if po.person_id not in run.met:
+            continue
+        iid = run.interactions.get(po.person_id) or LED.add_interaction(
+            person_id=po.person_id, at=run.at.isoformat(), event_id=EVENT_ID, raw_text=run.text, summary=outcome.summary)
+        LED.set_card(iid, po.card.model_dump())
+        cards.append({"person": LED.person(po.person_id), "card": po.card.model_dump(), "interaction_id": iid})
+    log("debrief", f"Debrief agent finished: {', '.join(c['person']['name'] for c in cards) or 'nobody identified'}.")
+    return {"status": "done", "cards": cards}
 
 
 async def finalize(did: str):
@@ -213,7 +267,7 @@ async def post_watch():
         live = await asyncio.to_thread(scout.page, top["url"]) if top.get("url") else {}
         if live.get("ok"):
             top["live_check"] = {"title": live["fields"].get("title"), "retrieved_at": live["retrieved_at"], "via": "Bright Data (sandboxed)"}
-        wp = await brain.find_warm_paths(LED, candidates[:10])
+        wp = await brain.find_warm_paths(LED, candidates[:10], hooks=[Guardrail(log), Audit(log, "warm-path agent")])
         for path in wp.paths:
             LED.add_draft(person_id=path.person_id, kind="warm path", text=path.draft,
                           reason={**path.model_dump(exclude={"draft"}), "posting": next((c for c in candidates if c["company"].lower() in path.why_now.lower()), candidates[0])},

@@ -10,11 +10,15 @@ Built for Battle of the Personal Brains (2026-09-21) with Cognee, Bright Data, A
 | Piece | Tool | Where |
 |---|---|---|
 | Memory: Me, tonight's room (temporary), people you met (permanent) | Cognee, local (LadybugDB, LanceDB, SQLite) | `app/memory.py` |
-| Reasoning: debrief extraction, person cards, "who to meet," warm paths, follow-ups | Strands Agents (tools plus typed output) | `app/brain.py` |
+| Debrief agent: one Strands agent chooses among 5 tools (`resolve_person`, `recall_memory`, `remember_meeting`, `set_promise_timer`, `web_lookup`). It pauses with a Strands **interrupt** to ask "which Kiran?" and resumes with your answer | Strands Agents: tools, interrupts, typed output | `app/debrief_agent.py` |
+| Guardrails and audit: Strands **hooks** cancel any tool that would send or post, and any web lookup for someone you didn't meet. Every tool call streams into the "What it did on its own" feed | Strands hooks (`BeforeToolCallEvent`, `AfterToolCallEvent`) | `app/guard.py` |
+| Other reasoning: "who to meet," the warm-path agent (with tools and the same hooks), next-morning follow-ups | Strands Agents | `app/brain.py` |
 | Live web: LinkedIn profiles, job pages, search | Bright Data MCP, called **inside a Docker sandbox** | `sandbox/scout.mjs`, `app/scout.py` |
 | Isolation: the only code that reads raw web text; its network reaches only `api.brightdata.com`; it can't see the brain; it returns whitelisted fields and strips injection lines | Docker Sandboxes (`sbx`, deny-all policy) | `rr-scout` sandbox |
 | Exact records: promises with due times, drafts, feed state | SQLite | `app/ledger.py` |
 | Change feed: new internship postings, with git history as proof of when each appeared | Public GitHub list | `app/feed.py` |
+
+**Fallback:** set `DEBRIEF_MODE=pipeline` to swap the agent for the original fixed-step pipeline, for example if the agent misbehaves live.
 
 **Privacy rules:**
 
