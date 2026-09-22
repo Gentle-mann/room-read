@@ -11,6 +11,10 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 # The dev shell inherits Claude Code's ANTHROPIC_BASE_URL; the app must talk to the real API.
 os.environ.pop("ANTHROPIC_BASE_URL", None)
+# Blank lines in .env (e.g. "AWS_ACCESS_KEY_ID=") must count as unset: Cognee treats "" as real AWS keys
+# and switches its file layer to S3.
+for _k in [k for k, v in os.environ.items() if v == ""]:
+    del os.environ[_k]
 
 TZ = ZoneInfo(os.getenv("TZ_NAME", "America/Los_Angeles"))
 PRIVATE = ROOT / "data" / "private"

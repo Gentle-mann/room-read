@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 os.environ.pop("ANTHROPIC_BASE_URL", None)
+for _k in [k for k, v in os.environ.items() if v == ""]:  # blank .env lines count as unset
+    del os.environ[_k]
 # Local embeddings so this runs without any key (same values as .env.example).
 os.environ.setdefault("EMBEDDING_PROVIDER", "fastembed")
 os.environ.setdefault("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")

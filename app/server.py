@@ -264,9 +264,8 @@ async def post_watch():
         for c in candidates[:3]:  # git log -S walks history; keep it to the top few
             c["first_seen"] = await asyncio.to_thread(feed.first_seen, repo, c)
         top = candidates[0]
-        live = await asyncio.to_thread(scout.page, top["url"]) if top.get("url") else {}
-        if live.get("ok"):
-            top["live_check"] = {"title": live["fields"].get("title"), "retrieved_at": live["retrieved_at"], "via": "Bright Data (sandboxed)"}
+        if top.get("url") and scout.ready():
+            asyncio.create_task(live_check(top))  # ~60 s through the unlocker; never block the result on it
         wp = await brain.find_warm_paths(LED, candidates[:10], hooks=[Guardrail(log), Audit(log, "warm-path agent")])
         for path in wp.paths:
             LED.add_draft(person_id=path.person_id, kind="warm path", text=path.draft,
@@ -277,6 +276,20 @@ async def post_watch():
     LED.put("watch", {"at": now().isoformat(), **summary})
     log("watch", f"Checked {summary['new_postings']} new postings against {len(people)} people: {len(summary['paths'])} worth your time.")
     return LED.get("watch")
+
+
+async def live_check(posting: dict):
+    """Confirm the posting is live on the employer's site via the sandboxed scout, then attach the proof."""
+    res = await asyncio.to_thread(scout.page, posting["url"])
+    w = LED.get("watch") or {}
+    if res.get("ok"):
+        w["live_check"] = {"company": posting["company"], "role": posting["role"], "title": res["fields"].get("title"),
+                           "retrieved_at": res["retrieved_at"], "via": "Bright Data, inside the Docker sandbox",
+                           "flagged_lines": res["fields"].get("flagged_lines", 0)}
+        LED.put("watch", w)
+        log("scout", f"Confirmed the {posting['company']} posting is live on their site (via Bright Data, sandboxed).")
+    else:
+        log("scout", f"Live check of the {posting['company']} posting failed: {res.get('error', '')[:100]}")
 
 
 # ---------- morning, promises, forgetting ----------

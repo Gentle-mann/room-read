@@ -167,7 +167,8 @@ function renderChanged(w) {
       <div><b>The right ask:</b> ${esc(p.ask)}</div>
       <div class="draft">${esc(p.draft)}</div>
       <div class="row">${copyBtn(p.draft)}<span class="mute">Draft only. Never sent.</span></div></div>`).join("");
-  $("changed").innerHTML = stats + (paths || `<div class="mute">${esc(w.notes || "Nothing worth interrupting you for.")}</div>`);
+  const live = w.live_check ? `<div class="mute" style="margin:4px 0 10px">✓ Live on ${esc(w.live_check.company)}'s site: ${esc(w.live_check.title || w.live_check.role)} <span class="src">${esc(w.live_check.via)}, ${esc(w.live_check.retrieved_at.slice(11, 16))} UTC</span></div>` : "";
+  $("changed").innerHTML = stats + live + (paths || `<div class="mute">${esc(w.notes || "Nothing worth interrupting you for.")}</div>`);
 }
 
 function renderLog(log) {

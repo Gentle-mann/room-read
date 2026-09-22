@@ -36,7 +36,9 @@ function linkedinFields(raw) {
 }
 
 function pageFields(raw) {
-  const title = (String(raw).match(/^#\s+(.+)$/m) ?? [])[1] ?? null;
+  const text = String(raw);
+  const title = (text.match(/^#{1,3}\s+(.+)$/m) ?? [])[1]
+    ?? text.split(/\r?\n/).map((l) => l.trim()).find((l) => /intern|engineer|developer/i.test(l) && l.length < 160) ?? null;
   const body = clean(raw, 1500);
   return { title, excerpt: body.text, flagged_lines: body.flagged };
 }

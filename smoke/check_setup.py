@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 # This shell inherits Claude Code's ANTHROPIC_BASE_URL; without this the app's calls go there.
 os.environ.pop("ANTHROPIC_BASE_URL", None)
+for _k in [k for k, v in os.environ.items() if v == ""]:  # blank .env lines count as unset
+    del os.environ[_k]
 
 TESLA_JOB = "https://www.tesla.com/careers/search/job/284003"
 results = {}
