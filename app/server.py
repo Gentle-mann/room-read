@@ -13,7 +13,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app import brain, debrief_agent, feed, memory, scout, scout_agent
+from app import brain, debrief_agent, feed, mapview, memory, scout, scout_agent
 from app.config import EVENT_ID, EVENT_NAME, FEEDS, GUESTS_DIR, HOSTS, PRIVATE, ROOM_DATASET, ROOT, now
 from app.guard import Audit, Guardrail
 from app.guests import Guest, load_guests, resolve
@@ -425,6 +425,24 @@ async def graph(dataset: str = "people"):
     name = {"people": memory.PEOPLE_DATASET, "me": memory.ME_DATASET, "room": ROOM_DATASET}.get(dataset, memory.PEOPLE_DATASET)
     path = await memory.graph_html(PRIVATE / f"graph-{dataset}.html", name)
     return FileResponse(path)
+
+
+@app.get("/api/map")
+async def relationship_map(cognee: int = 0):
+    """Nodes and labeled edges for the map page; ?cognee=1 overlays what Cognee extracted."""
+    m = mapview.build(LED, LED.get("watch"))
+    facts, error = 0, None
+    if cognee:
+        try:
+            facts = await mapview.add_cognee_layer(m)
+        except Exception as e:  # noqa: BLE001 - the map still works without the overlay
+            error = f"Cognee layer unavailable ({type(e).__name__})"
+    return {"nodes": list(m.nodes.values()), "edges": m.edges, "cognee_facts": facts, "error": error}
+
+
+@app.get("/map")
+async def map_page():
+    return FileResponse(ROOT / "static" / "map.html")
 
 
 @app.get("/")

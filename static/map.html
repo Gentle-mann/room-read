@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Room Read · Map</title>
+<script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1c1b19; --mute:#6b6862; --line:#e4e1da; --accent:#3a5bd9; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141413; --card:#1e1d1b; --ink:#f1efe9; --mute:#a19d94; --line:#34322e; --accent:#8aa2ff; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:18px; }
+  header a { color:var(--accent); text-decoration:none; font-size:14px; }
+  .explain { color:var(--mute); font-size:13px; padding:8px 16px 0; max-width:900px; }
+  .bar { display:flex; gap:14px; flex-wrap:wrap; padding:10px 16px; font-size:13px; align-items:center; }
+  .bar label { display:flex; gap:5px; align-items:center; cursor:pointer; }
+  .wrap { display:grid; grid-template-columns: 1fr 320px; gap:12px; padding:0 16px 16px; }
+  @media (max-width: 820px) { .wrap { grid-template-columns: 1fr; } }
+  #net { height:66vh; min-height:420px; background:var(--card); border:1px solid var(--line); border-radius:14px; }
+  .side { display:flex; flex-direction:column; gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; }
+  .card h3 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--mute); }
+  .leg { display:grid; grid-template-columns: 22px 1fr; gap:5px 8px; align-items:center; font-size:13px; }
+  .dot { width:14px; height:14px; border-radius:50%; justify-self:center; }
+  .ln { width:22px; height:0; border-top:3px solid #888; }
+  #detail .k { font-size:12px; color:var(--mute); text-transform:uppercase; letter-spacing:.05em; }
+  #detail .t { font-weight:650; font-size:16px; margin:2px 0 8px; }
+  #detail ul { margin:6px 0; padding-left:18px; }
+  #detail .conn { font-size:13px; padding:4px 0; border-top:1px solid var(--line); }
+  .src { font-size:11px; color:var(--mute); border:1px solid var(--line); border-radius:6px; padding:0 5px; margin-left:4px; white-space:nowrap; }
+  .draft { white-space:pre-wrap; background:var(--bg); border:1px dashed var(--line); border-radius:10px; padding:8px; font-size:13px; }
+  .empty { color:var(--mute); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Your memory, as a map</h1>
+  <a href="/">← Back to Room Read</a>
+  <span class="empty" id="stats"></span>
+</header>
+<div class="explain">
+  Each dot is a person, company, promise or new job posting. Each line says how two things connect, and the <b>line style shows how you know it</b>: something you heard yourself, something from your notes, or something looked up on the web. Tap anything for details.
+</div>
+<div class="bar">
+  <label><input type="checkbox" id="t-company" checked> Companies</label>
+  <label><input type="checkbox" id="t-promise" checked> Promises</label>
+  <label><input type="checkbox" id="t-posting" checked> New postings</label>
+  <label><input type="checkbox" id="t-cognee"> What Cognee extracted</label>
+  <button id="fit">Fit to screen</button>
+</div>
+<div class="wrap">
+  <div id="net"></div>
+  <div class="side">
+    <div class="card" id="detail"><div class="empty">Tap a dot or a line to see what it means.</div></div>
+    <div class="card">
+      <h3>Dots</h3>
+      <div class="leg" id="legend-nodes"></div>
+      <h3 style="margin-top:12px">Lines: how you know it</h3>
+      <div class="leg" id="legend-edges"></div>
+    </div>
+  </div>
+</div>
+<script>
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+const GROUPS = {
+  "you":         { color: dark ? "#f1efe9" : "#1c1b19", label: "You", size: 30 },
+  "met-tonight": { color: "#3a5bd9", label: "Someone you met tonight", size: 22 },
+  "met-before":  { color: "#8a4fd8", label: "Someone you met before", size: 22 },
+  "company":     { color: "#1f8a4c", label: "Company", size: 16 },
+  "promise":     { color: "#e0822a", label: "Promise you owe", size: 14 },
+  "promise-done":{ color: "#9a968e", label: "Promise kept", size: 12 },
+  "posting":     { color: "#d33a3a", label: "New job posting", size: 16 },
+  "cognee":      { color: "#2a9d9d", label: "Fact Cognee extracted", size: 9 },
+};
+const SOURCES = {
+  "first-hand": { label: "You heard it yourself", color: "#3a5bd9", dashes: false, width: 2.5 },
+  "my notes":   { label: "From your notes", color: "#8a4fd8", dashes: [10, 6], width: 2 },
+  "web":        { label: "Looked up on the web (Bright Data)", color: "#1f8a4c", dashes: [2, 5], width: 2 },
+  "feed":       { label: "Public job feed", color: "#d33a3a", dashes: [6, 4], width: 1.5 },
+  "warm":       { label: "Warm path: a reason to reach out", color: "#d33a3a", dashes: false, width: 4 },
+  "cognee":     { label: "Cognee's extracted relationship", color: "#9a968e", dashes: false, width: 1 },
+};
+const ink = dark ? "#f1efe9" : "#1c1b19";
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+document.getElementById("legend-nodes").innerHTML = Object.values(GROUPS).map((g) => `<span class="dot" style="background:${g.color}"></span><span>${g.label}</span>`).join("");
+document.getElementById("legend-edges").innerHTML = Object.values(SOURCES).map((s) =>
+  `<span class="ln" style="border-top:${Math.max(2, s.width)}px ${s.dashes ? (s.dashes[0] > 4 ? "dashed" : "dotted") : "solid"} ${s.color}"></span><span>${s.label}</span>`).join("");
+
+let data = null, network = null, nodesDS = null, edgesDS = null;
+
+async function load() {
+  const withCognee = document.getElementById("t-cognee").checked;
+  document.getElementById("stats").textContent = withCognee ? "Loading Cognee's facts…" : "";
+  data = await (await fetch(`/api/map${withCognee ? "?cognee=1" : ""}`)).json();
+  const people = data.nodes.filter((n) => n.group.startsWith("met")).length;
+  document.getElementById("stats").textContent = `${people} people · ${data.edges.length} connections` + (withCognee ? ` · ${data.cognee_facts} facts from Cognee` : "") + (data.error ? ` · ${data.error}` : "");
+  draw();
+}
+
+function visible(n) {
+  const g = n.group;
+  if (g === "company") return document.getElementById("t-company").checked;
+  if (g.startsWith("promise")) return document.getElementById("t-promise").checked;
+  if (g === "posting") return document.getElementById("t-posting").checked;
+  if (g === "cognee") return document.getElementById("t-cognee").checked;
+  return true;
+}
+
+function draw() {
+  const shown = new Set(data.nodes.filter(visible).map((n) => n.id));
+  nodesDS = new vis.DataSet(data.nodes.filter((n) => shown.has(n.id)).map((n) => {
+    const g = GROUPS[n.group] || GROUPS.cognee;
+    return { id: n.id, label: n.label, color: { background: g.color, border: g.color, highlight: { background: g.color, border: ink } },
+             size: g.size, shape: "dot", font: { color: n.group === "you" ? ink : ink, size: n.group === "cognee" ? 11 : 14, strokeWidth: 3, strokeColor: dark ? "#1e1d1b" : "#ffffff" } };
+  }));
+  edgesDS = new vis.DataSet(data.edges.filter((e) => shown.has(e.from) && shown.has(e.to)).map((e, i) => {
+    const s = SOURCES[e.source] || SOURCES.cognee;
+    return { id: i, from: e.from, to: e.to, label: e.label, dashes: s.dashes, width: s.width, color: { color: s.color, highlight: ink },
+             arrows: { to: { enabled: true, scaleFactor: 0.4 } }, font: { size: 11, color: ink, strokeWidth: 4, strokeColor: dark ? "#1e1d1b" : "#ffffff", align: "horizontal" },
+             smooth: { type: "dynamic" } };
+  }));
+  const opts = { physics: { barnesHut: { gravitationalConstant: -9000, springLength: 150, springConstant: 0.03 }, stabilization: { iterations: 250 } },
+                 interaction: { hover: true, tooltipDelay: 150 }, nodes: { borderWidth: 2 } };
+  if (network) network.destroy();
+  network = new vis.Network(document.getElementById("net"), { nodes: nodesDS, edges: edgesDS }, opts);
+  network.once("stabilizationIterationsDone", () => network.fit({ animation: false }));
+  network.on("click", (p) => {
+    if (p.nodes.length) showNode(p.nodes[0]);
+    else if (p.edges.length) showEdge(p.edges[0]);
+  });
+}
+
+function name(id) { const n = data.nodes.find((x) => x.id === id); return n ? n.label : id; }
+
+function showNode(id) {
+  const n = data.nodes.find((x) => x.id === id), d = n.detail || {};
+  const conns = data.edges.filter((e) => e.from === id || e.to === id).map((e) => {
+    const other = e.from === id ? e.to : e.from, dir = e.from === id ? `${esc(e.label)} → ${esc(name(other))}` : `${esc(name(other))} → ${esc(e.label)}`;
+    return `<div class="conn">${dir}<span class="src">${esc((SOURCES[e.source] || {}).label || e.source)}</span></div>`;
+  }).join("");
+  const rows = [];
+  if (d.headline) rows.push(`<div>${esc(d.headline)}</div>`);
+  if (d.text) rows.push(`<div>${esc(d.text)}</div>`);
+  if (d.due) rows.push(`<div>Due ${esc(d.due.slice(0, 16).replace("T", " "))} · ${esc(d.status)}</div>`);
+  if (d.why && d.why.length) rows.push(`<ul>${d.why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>`);
+  if (d.web && Object.keys(d.web).length) rows.push(`<div class="empty">Web: ${esc(Object.entries(d.web).map(([k, v]) => `${k.replace("_", " ")}: ${Array.isArray(v) ? v.join(", ") : v}`).join(" · "))}</div>`);
+  if (d.ask) rows.push(`<div><b>The ask:</b> ${esc(d.ask)}</div>`);
+  if (d.live) rows.push(`<div class="empty">✓ ${esc(d.live)}</div>`);
+  const draft = d.follow_up || d.draft;
+  if (draft) rows.push(`<div class="k" style="margin-top:8px">Draft (never sent)</div><div class="draft">${esc(draft)}</div>`);
+  if (d.links) rows.push(`<div>${Object.entries(d.links).map(([k, v]) => `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(k)}</a>`).join(" · ")}</div>`);
+  document.getElementById("detail").innerHTML = `<div class="k">${esc(d.kind || n.group)}</div><div class="t">${esc(n.label)}</div>${rows.join("")}
+    <div class="k" style="margin-top:10px">Connections</div>${conns || '<div class="empty">None shown</div>'}`;
+}
+
+function showEdge(i) {
+  const e = edgesDS.get(i), raw = data.edges.filter((x) => shownEdge(x))[i] || data.edges.find((x) => x.from === e.from && x.to === e.to);
+  const s = SOURCES[raw.source] || {};
+  document.getElementById("detail").innerHTML = `<div class="k">Connection</div><div class="t">${esc(name(raw.from))} → ${esc(raw.label)} → ${esc(name(raw.to))}</div>
+    <div><b>How you know it:</b> ${esc(s.label || raw.source)}</div>${raw.note ? `<div class="empty" style="margin-top:6px">${esc(raw.note)}</div>` : ""}`;
+}
+function shownEdge(e) { return nodesDS.get(e.from) && nodesDS.get(e.to); }
+
+["t-company", "t-promise", "t-posting"].forEach((id) => document.getElementById(id).onchange = draw);
+document.getElementById("t-cognee").onchange = load;
+document.getElementById("fit").onclick = () => network && network.fit({ animation: true });
+load();
+</script>
+</body>
+</html>
