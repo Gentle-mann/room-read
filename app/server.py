@@ -388,8 +388,10 @@ async def state():
 
 
 @app.get("/api/graph")
-async def graph():
-    path = await memory.graph_html(PRIVATE / "graph.html")
+async def graph(dataset: str = "people"):
+    """Graph view: ?dataset=people (default), me, or room."""
+    name = {"people": memory.PEOPLE_DATASET, "me": memory.ME_DATASET, "room": ROOM_DATASET}.get(dataset, memory.PEOPLE_DATASET)
+    path = await memory.graph_html(PRIVATE / f"graph-{dataset}.html", name)
     return FileResponse(path)
 
 

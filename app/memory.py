@@ -99,7 +99,8 @@ async def forget_person(data_ids: list[str], name: str | None = None) -> int:
     return len(targets)
 
 
-async def graph_html(path: Path) -> Path:
+async def graph_html(path: Path, dataset: str = PEOPLE_DATASET) -> Path:
+    """Cognee's interactive graph of one dataset (access control requires naming it)."""
     cognee = await init_cognee()
-    await cognee.visualize_graph(destination_file_path=str(path))
+    await cognee.visualize_graph(destination_file_path=str(path), dataset=dataset, full=True, max_nodes=400)
     return path
