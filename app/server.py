@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app import brain, debrief_agent, feed, memory, scout
+from app import brain, debrief_agent, feed, memory, scout, scout_agent
 from app.config import EVENT_ID, EVENT_NAME, FEEDS, GUESTS_DIR, HOSTS, PRIVATE, ROOM_DATASET, ROOT, now
 from app.guard import Audit, Guardrail
 from app.guests import Guest, load_guests, resolve
@@ -50,27 +50,35 @@ async def remember_person(pid: str, docs: list[str], label: str):
 
 
 async def web_lookup(pid: str, name: str, linkedin_url: str | None, hint: str = ""):
-    """Sandboxed Bright Data lookup. Stores only whitelisted fields, labeled with source and retrieval time."""
+    """The Strands scout agent looks the person up with Bright Data's MCP tools (inside the Docker sandbox); its typed
+    report is written into Cognee with source and retrieval time. Falls back to the direct sandboxed call."""
     if not scout.ready():
         return
-    url = linkedin_url
-    if not url:
-        found = await asyncio.to_thread(scout.search, f"{name} {hint} site:linkedin.com/in")
-        url = (found.get("fields") or {}).get("linkedin_profiles", [None])[0]
-        if not url:
-            log("scout", f"No LinkedIn profile found for {name}.")
+    source = "web lookup (Strands scout agent → Bright Data MCP inside the Docker sandbox)"
+    try:
+        report = await asyncio.to_thread(scout_agent.look_up, name, linkedin_url, hint, log)
+        if not report.found:
+            log("scout", f"Scout agent could not confirm a profile for {name}: {report.notes[:100]}")
             return
-    res = await asyncio.to_thread(scout.linkedin_profile, url)
-    if not res.get("ok"):
-        log("scout", f"Web lookup for {name} failed: {res.get('error', '')[:120]}")
-        return
-    prof = dict(res["fields"], source="web lookup (Bright Data, sandboxed)", retrieved_at=res["retrieved_at"])
+        prof = {"name": report.name, "headline": report.headline, "current_company": report.current_company,
+                "experience": [j.model_dump() for j in report.past_companies], "education": report.education,
+                "city": report.city, "url": report.linkedin_url or linkedin_url, "notes": report.notes,
+                "source": source, "retrieved_at": scout_agent.retrieved_at()}
+    except Exception as e:  # noqa: BLE001 - never lose the lookup because the agent path failed
+        log("scout", f"Scout agent failed ({type(e).__name__}); using the direct sandboxed call.")
+        if not linkedin_url:
+            return
+        res = await asyncio.to_thread(scout.linkedin_profile, linkedin_url)
+        if not res.get("ok"):
+            log("scout", f"Web lookup for {name} failed: {res.get('error', '')[:120]}")
+            return
+        prof = dict(res["fields"], source="web lookup (Bright Data MCP, sandboxed)", retrieved_at=res["retrieved_at"])
     LED.set_profile(pid, prof)
-    jobs = "; ".join(f"{e.get('title')} at {e.get('company')} ({e.get('start')}–{e.get('end') or 'present'})" for e in prof.get("experience", []))
+    jobs = "; ".join(f"{e.get('title')} at {e.get('company')} ({e.get('start')}–{e.get('end') or 'present'})" for e in prof.get("experience") or [])
     doc = (f"According to {name}'s public LinkedIn profile, retrieved {prof['retrieved_at']} via Bright Data: "
-           f"headline '{prof.get('headline')}', currently at {prof.get('current_company')}. Work history: {jobs}.")
-    flagged = prof.get("flagged_lines", 0)
-    log("scout", f"Looked up {name} in the sandbox" + (f"; stripped {flagged} suspicious line(s)." if flagged else "."))
+           f"headline '{prof.get('headline')}', currently at {prof.get('current_company')}. "
+           f"Work history: {jobs or 'not listed on the profile'}. Education: {'; '.join(map(str, prof.get('education') or [])) or 'n/a'}.")
+    log("scout", f"Web profile for {name} verified ({prof.get('current_company') or 'no current company'}); writing it into Cognee.")
     await remember_person(pid, [doc], f"{name}'s web profile")
 
 
@@ -315,7 +323,9 @@ async def close_promise(pid: str, status: str):
 async def midnight():
     async with WRITE_LOCK:
         await memory.forget_room()
+        improved = await memory.improve_people()
     met = len([p for p in LED.people() if p["event_id"] == EVENT_ID])
+    log("memory", "Cognee improve() ran on permanent memory: " + ("consolidated tonight's people." if improved else "nothing to consolidate."))
     forgotten = len(STATE["guests"]) - met
     STATE["guests"] = []
     LED.put("room_forgotten_at", now().isoformat())

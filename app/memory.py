@@ -52,6 +52,16 @@ async def forget_room():
     return await cognee.forget(dataset=ROOM_DATASET)
 
 
+async def improve_people() -> bool:
+    """Cognee's self-improvement pass over permanent memory: merge duplicates, reweight, derive facts."""
+    cognee = await init_cognee()
+    try:
+        await cognee.improve(dataset=PEOPLE_DATASET)
+        return True
+    except Exception:  # noqa: BLE001 - an empty dataset has nothing to improve
+        return False
+
+
 async def _dataset_id(name: str):
     cognee = await init_cognee()
     for ds in await cognee.datasets.list_datasets():

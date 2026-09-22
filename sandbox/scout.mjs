@@ -29,6 +29,7 @@ function linkedinFields(raw) {
     headline: headline.text,
     current_company: rec.current_company?.name ?? rec.current_company_name ?? null,
     experience: exp,
+    education: (rec.education ?? []).slice(0, 5).map((e) => ({ school: e.title ?? null, start: e.start_year ?? null, end: e.end_year ?? null })),
     city: rec.city ?? null,
     url: rec.url ?? rec.input_url ?? null,
     flagged_lines: headline.flagged, // 'about' and posts are deliberately dropped: free text is where injections hide

@@ -13,7 +13,8 @@ Built for Battle of the Personal Brains (2026-09-21) with Cognee, Bright Data, A
 | Debrief agent: one Strands agent chooses among 5 tools (`resolve_person`, `recall_memory`, `remember_meeting`, `set_promise_timer`, `web_lookup`). It pauses with a Strands **interrupt** to ask "which Kiran?" and resumes with your answer | Strands Agents: tools, interrupts, typed output | `app/debrief_agent.py` |
 | Guardrails and audit: Strands **hooks** cancel any tool that would send or post, and any web lookup for someone you didn't meet. Every tool call streams into the "What it did on its own" feed | Strands hooks (`BeforeToolCallEvent`, `AfterToolCallEvent`) | `app/guard.py` |
 | Other reasoning: "who to meet," the warm-path agent (with tools and the same hooks), next-morning follow-ups | Strands Agents | `app/brain.py` |
-| Live web: LinkedIn profiles, job pages, search | Bright Data MCP, called **inside a Docker sandbox** | `sandbox/scout.mjs`, `app/scout.py` |
+| Scout agent: a **Strands agent whose tools are Bright Data's MCP server, running inside the Docker sandbox** (Strands connects over stdio through `sbx exec -i`). A sanitizer hook rewrites every result before the model reads it. The agent's typed report is written **into Cognee** with its source and retrieval time | Strands + Bright Data MCP + Docker Sandboxes + Cognee | `app/scout_agent.py` |
+| Direct fallback: the same Bright Data MCP tools through a small runner in the sandbox, used for posting live-checks and if the agent path fails | Bright Data MCP in Docker | `sandbox/scout.mjs`, `app/scout.py` |
 | Isolation: the only code that reads raw web text; its network reaches only `api.brightdata.com`; it can't see the brain; it returns whitelisted fields and strips injection lines | Docker Sandboxes (`sbx`, deny-all policy) | `rr-scout` sandbox |
 | Exact records: promises with due times, drafts, feed state | SQLite | `app/ledger.py` |
 | Change feed: new internship postings, with git history as proof of when each appeared | Public GitHub list | `app/feed.py` |
@@ -24,7 +25,7 @@ Built for Battle of the Personal Brains (2026-09-21) with Cognee, Bright Data, A
 
 - The guest list is loaded into a temporary dataset, `room-<event>`.
 - Only people you debrief are promoted to `people`.
-- At midnight, `forget(dataset=room)` wipes everyone you didn't meet.
+- At midnight, `forget(dataset=room)` wipes everyone you didn't meet, then Cognee's `improve()` consolidates permanent memory.
 - "Forget" on any person deletes their documents.
 - Drafts are never sent.
 
