@@ -54,6 +54,9 @@ async def web_lookup(pid: str, name: str, linkedin_url: str | None, hint: str = 
     report is written into Cognee with source and retrieval time. Falls back to the direct sandboxed call."""
     if not scout.ready() or not STATE["lookups"]:
         return
+    if not linkedin_url and len(name.split()) < 2 and not hint:
+        log("scout", f"Skipped the web lookup for {name}: a first name alone can't identify anyone. Add a surname or company.")
+        return
     source = "web lookup (Strands scout agent → Bright Data MCP inside the Docker sandbox)"
     try:
         report = await asyncio.to_thread(scout_agent.look_up, name, linkedin_url, hint, log)

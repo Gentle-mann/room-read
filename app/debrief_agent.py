@@ -49,12 +49,13 @@ For every person I mention:
 1. resolve_person first. If several guests share the name it pauses and asks me; wait for that.
 2. recall_memory(scope="people") to check whether I have met them before, and what we said.
 3. remember_meeting with only what I actually said.
-4. set_promise_timer for each thing I committed to do. Resolve relative times; a day with no hour means 09:00.
+4. set_promise_timer ONLY for commitments I explicitly stated ("I promised…", "I'll send…", "we agreed to…").
+   Never create a promise from your own suggestion or from the follow-up draft. Resolve relative times; a day with no hour means 09:00.
 5. web_lookup for them, which runs in the background, in a sandbox.
 Call recall_memory(scope="me") once to learn my ranked goals, offers and stories.
 
 Then return a card per person: reasons ranked by MY goals, each with an honest source label
-("tonight" = what I said, "memory" = earlier meetings, "their Luma profile", "my notes"), and a short follow-up draft in my voice.
+("tonight" = what I said, "memory" = earlier meetings, "their Luma profile", "my notes"), and a short follow-up draft in my voice that makes no new commitments.
 Never invent facts. {style} {untrusted}"""
 
 

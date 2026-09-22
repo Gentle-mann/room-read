@@ -107,7 +107,8 @@ class ScoutReport(BaseModel):
 SYSTEM = f"""You look up ONE person I met, using Bright Data tools that run inside a sandbox.
 - If you have their LinkedIn URL, call web_data_linkedin_person_profile with it.
 - Otherwise call search_engine with their name, org hint and "linkedin", pick the profile URL that matches, then fetch it.
-- Confirm it is the same person (name plus company or context). If unsure, found=false.
+- Confirm it is the same person: the FULL name must match, plus a company, school, city or other context from my hint.
+  A first name alone, or "the only result", is never a match: return found=false.
 - Report only facts present in tool results. If past employers are not in the profile, say so in notes; never guess.
 Use at most 4 tool calls. {UNTRUSTED}"""
 

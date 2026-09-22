@@ -65,7 +65,10 @@ class Card(BaseModel):
     headline: str = Field(description="Who they are, in under 12 words")
     why_it_matters: list[Reason] = Field(description="At most 3 reasons tied to MY ranked goals, each with its source")
     follow_up: str = Field(description="A short follow-up message draft in my voice, referencing what we actually discussed. " + STYLE)
-    kind: Literal["can help you", "you can help", "same wavelength", "say hello"]
+    kind: Literal["can help you", "you can help", "same wavelength", "say hello"] = Field(
+        description="'can help you' = they can move MY goals forward (hiring, investing, expertise I need); "
+                    "'you can help' = they need something I can offer; 'same wavelength' = building similar things; "
+                    "'say hello' = hosts, judges or sponsors")
 
 
 async def make_card(person: dict, debrief_summary: str, facts: list[str]) -> Card:
