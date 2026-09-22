@@ -5,11 +5,11 @@ import subprocess
 from pathlib import Path
 
 REPO_URL = "https://github.com/Chieler/Summer-2027-SWE-Internships"
-# Default baseline: the list as of 2026-09-18. "New" means added after it unless the ledger stores a later ref.
-DEFAULT_BASELINE = "03eb51a"
+# "New" means added in the last FEED_WINDOW_DAYS days (a weekly watch), unless the ledger stores a later ref.
+DEFAULT_BASELINE = "03eb51a"  # fallback if the history has no commit old enough
 
 RELEVANT = re.compile(r"software|engineer|developer|\bai\b|machine learning|\bml\b|data|full[- ]?stack|mobile|platform|agent", re.I)
-IRRELEVANT = re.compile(r"next gen|high school|electrical|mechanical|power electronics|hardware|firmware|embedded|manufactur|accounting|sales|marketing|finance intern|legal", re.I)
+IRRELEVANT = re.compile(r"next gen|high school|electrical|electronic|mechanical|actuator|power electronics|hardware|firmware|embedded|body controls|systems integration|reliability|manufactur|accounting|sales|marketing|finance intern|legal", re.I)
 LINK = re.compile(r"\((https?://[^)]+)\)")
 
 
@@ -25,6 +25,12 @@ def ensure_repo(folder: Path) -> Path:
     else:
         _git(repo, "pull", "--quiet", "--ff-only")
     return repo
+
+
+def baseline(repo: Path, days: int) -> str:
+    """The list as it was `days` ago: the last commit before that moment."""
+    ref = _git(repo, "rev-list", "-1", f"--before={days} days ago", "HEAD").strip()
+    return ref[:7] if ref else DEFAULT_BASELINE
 
 
 def parse_row(line: str) -> dict | None:
@@ -52,6 +58,20 @@ def new_postings(repo: Path, since_ref: str) -> dict:
 def is_relevant(posting: dict) -> bool:
     role = posting["role"]
     return bool(RELEVANT.search(role)) and not IRRELEVANT.search(role)
+
+
+SOFTWARE = re.compile(r"software|\bai\b|machine learning|\bml\b|full[- ]?stack|agent|platform|product(s)? engineer", re.I)
+
+
+def rank(postings: list[dict]) -> list[dict]:
+    """De-duplicate by URL (the list repeats rows across sections) and put software/AI roles first."""
+    seen, out = set(), []
+    for p in postings:
+        key = p.get("url") or (p["company"], p["role"])
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return sorted(out, key=lambda p: 0 if SOFTWARE.search(p["role"]) else 1)
 
 
 def first_seen(repo: Path, posting: dict) -> str | None:

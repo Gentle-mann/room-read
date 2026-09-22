@@ -267,12 +267,15 @@ async def post_breakdown():
 @app.post("/api/watch")
 async def post_watch():
     repo = await asyncio.to_thread(feed.ensure_repo, FEEDS)
-    since = LED.get("feed_ref", feed.DEFAULT_BASELINE)
+    since = LED.get("feed_ref") or await asyncio.to_thread(feed.baseline, repo, int(os.getenv("FEED_WINDOW_DAYS", "7")))
     res = await asyncio.to_thread(feed.new_postings, repo, since)
     relevant = [p for p in res["postings"] if feed.is_relevant(p)]
     people = LED.people()
     haystack = {p["id"]: (" ".join(i["raw_text"] or "" for i in LED.interactions(p["id"])) + " " + str(p.get("profile") or "")).lower() for p in people}
-    candidates = [p for p in relevant if any(p["company"].lower() in h for h in haystack.values())]
+    def mentions(company: str, text: str) -> bool:  # whole words: "Cisco" must not match "San Francisco"
+        return re.search(rf"\b{re.escape(company.lower())}\b", text) is not None
+
+    candidates = feed.rank([p for p in relevant if any(mentions(p["company"], h) for h in haystack.values())])
     summary = {"since": since, "head": res["head"], "head_time": res["head_time"], "new_postings": len(res["postings"]),
                "relevant": len(relevant), "people_checked": len(people), "candidates": len(candidates), "paths": []}
     if candidates:

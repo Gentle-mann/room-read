@@ -156,7 +156,7 @@ function renderChanged(w) {
   if (!w) return;
   $("changed-sec").hidden = false;
   const stats = `<div class="grid">
-    <div class="card"><div class="stat">${w.new_postings}</div><div class="mute">new postings since ${esc(w.since)}</div></div>
+    <div class="card"><div class="stat">${w.new_postings}</div><div class="mute">new postings this week (since ${esc(w.since)})</div></div>
     <div class="card"><div class="stat">${w.people_checked}</div><div class="mute">people in memory checked</div></div>
     <div class="card"><div class="stat">${w.paths.length}</div><div class="mute">worth your time</div></div></div>`;
   const paths = w.paths.map((p) => `<div class="card">

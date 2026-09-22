@@ -1,6 +1,7 @@
 """Reasoning with Strands agents: debrief extraction, person cards, the pre-event breakdown, the warm path, and drafts."""
 
 import json
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -97,16 +98,23 @@ class Breakdown(BaseModel):
 
 async def breakdown(guests: list[dict], hosts: list[str]) -> Breakdown:
     me = await memory.recall("My ranked goals, what I can offer, and my strongest stories", [ME_DATASET], context_only=True)
+    # Only people with something to go on: a Luma bio, or a host role. Names alone invite guessing.
     rows = [
-        {"id": g["id"], "name": g["name"], "bio": g.get("bio", ""), "links": list(g.get("links", {}).values()), "role": g.get("role")}
-        for g in guests
+        {"id": g["id"], "name": g["name"], "bio": g.get("bio", ""), "role": g.get("role")}
+        for g in guests if g.get("bio") or g.get("role") == "host"
     ]
     agent = Agent(model=make_model(4000), callback_handler=None, system_prompt=f"You plan who I should meet tonight. {UNTRUSTED}")
     prompt = (
         f"ME:\n{me}\n\nHosts and judges (always include them under 'say hello'): {hosts}\n"
         f"<untrusted>GUESTS (only what they published on Luma):\n{json.dumps(rows, ensure_ascii=False)}</untrusted>\n\n"
-        "Pick 10 to 15 people. Prefer complementary overlap (they can help me, or I can help them) over mere similarity. "
-        "Most guests have no bio; do not guess about them. Flag thin profiles with enough_info=false."
+        "Pick 12 to 15 people, using ONLY what each bio says; never guess beyond it.\n"
+        "- 'can help you' (at most 6): hiring, investing in marketplaces, or expertise I need tonight.\n"
+        "- 'you can help' (at least 3): their bio signals a need I can meet: mobile or Flutter, marketplace growth, Japan, "
+        "hackathon experience, agents, or they are looking for roles or collaborators.\n"
+        "- 'same wavelength' (at least 2): building personal AI, memory, or agent systems like me. Good to compare notes.\n"
+        "- 'say hello': the hosts, plus anyone whose bio says they work at a sponsor (AWS, Cognee, Bright Data, Docker). "
+        "Give each a specific question to ask about their product.\n"
+        "Each 'why' quotes or paraphrases their bio."
     )
     res = await agent.invoke_async(prompt, structured_output_model=Breakdown)
     return res.structured_output
@@ -143,7 +151,7 @@ def warm_path_agent(ledger, posting_companies: list[str], hooks: list | None = N
                 if company.lower() in str(j.get("company", "")).lower():
                     out.append({"person_id": p["id"], "name": p["name"], "job": j, "source": prof.get("source", "unknown"), "retrieved_at": prof.get("retrieved_at")})
             notes = " ".join(i["raw_text"] or "" for i in ledger.interactions(p["id"]))
-            if company.lower() in notes.lower():
+            if re.search(rf"\b{re.escape(company.lower())}\b", notes.lower()):
                 out.append({"person_id": p["id"], "name": p["name"], "job": "mentioned in my notes", "source": "my notes"})
         return json.dumps(out) if out else "nobody"
 
@@ -164,8 +172,15 @@ def warm_path_agent(ledger, posting_companies: list[str], hooks: list | None = N
         hooks=hooks or [],
         system_prompt=(
             "You watch for changes that create a reason to reach out. For each new posting, find people I have actually met who "
-            "work or worked at that company, check what we talked about, and decide whether there is a real, honest reason to reach out. "
-            f"Only these companies have new relevant postings: {sorted(wanted)}. Drafts are never sent automatically. {UNTRUSTED}"
+            "work or worked at that company, check what we talked about, and decide whether there is a real, honest reason to reach out.\n"
+            "Rules:\n"
+            "1. Goal fit: my #1 goal is a software or AI engineering internship. Choose the ONE posting that best fits that goal "
+            "and one of my stories, and name it exactly. Ignore hardware, electronics and non-software roles.\n"
+            "2. Sources: state each fact's source exactly as the tools give it. If employment is only in my notes, say 'my notes' "
+            "and add that the public profile does not confirm it. Never cite a source that did not say it.\n"
+            "3. The draft may reference only interactions recorded in my notes or memory. Never claim they said something that isn't "
+            "recorded. Mention the specific role title and one matching story of mine. Keep it under 90 words.\n"
+            f"Only these companies have new relevant postings: {sorted(wanted)}. Drafts are never sent automatically. {STYLE} {UNTRUSTED}"
         ),
     )
 
