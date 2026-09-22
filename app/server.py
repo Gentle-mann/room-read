@@ -21,7 +21,7 @@ from app.ledger import Ledger
 
 app = FastAPI(title="Room Read")
 LED = Ledger(PRIVATE / "ledger.db")
-STATE = {"guests": load_guests(GUESTS_DIR, HOSTS)}
+STATE = {"guests": load_guests(GUESTS_DIR, HOSTS), "lookups": True}
 PENDING: dict[str, dict] = {}  # pipeline mode: debrief_id -> {"text", "debrief", "questions", "resolved"}
 AGENTS: dict[str, dict] = {}  # agent mode: debrief_id -> {"agent", "run", "questions", "answers"}
 DEBRIEF_MODE = os.getenv("DEBRIEF_MODE", "agent")  # "pipeline" = the fixed-step fallback
@@ -52,7 +52,7 @@ async def remember_person(pid: str, docs: list[str], label: str):
 async def web_lookup(pid: str, name: str, linkedin_url: str | None, hint: str = ""):
     """The Strands scout agent looks the person up with Bright Data's MCP tools (inside the Docker sandbox); its typed
     report is written into Cognee with source and retrieval time. Falls back to the direct sandboxed call."""
-    if not scout.ready():
+    if not scout.ready() or not STATE["lookups"]:
         return
     source = "web lookup (Strands scout agent → Bright Data MCP inside the Docker sandbox)"
     try:
@@ -82,12 +82,19 @@ async def web_lookup(pid: str, name: str, linkedin_url: str | None, hint: str = 
     await remember_person(pid, [doc], f"{name}'s web profile")
 
 
+MAIN_LOOP: asyncio.AbstractEventLoop | None = None
+
+
 def background(kind: str, **kw):
-    """Schedule slow work the agent's tools asked for, so the card comes back fast."""
+    """Schedule slow work the agent's tools asked for, so the card comes back fast.
+    Strands runs plain tools on worker threads, so hand the coroutine to the server's loop thread-safely."""
     if kind == "remember":
-        asyncio.create_task(remember_person(kw["pid"], kw["docs"], kw["label"]))
+        coro = remember_person(kw["pid"], kw["docs"], kw["label"])
     elif kind == "lookup":
-        asyncio.create_task(web_lookup(kw["pid"], kw["name"], kw.get("linkedin"), kw.get("hint", "")))
+        coro = web_lookup(kw["pid"], kw["name"], kw.get("linkedin"), kw.get("hint", ""))
+    else:
+        return
+    asyncio.run_coroutine_threadsafe(coro, MAIN_LOOP)
 
 
 # ---------- debrief ----------
@@ -333,6 +340,14 @@ async def midnight():
     return {"forgotten": forgotten, "kept": met}
 
 
+@app.post("/api/lookups/{mode}")
+async def set_lookups(mode: str):
+    """Turn web lookups on or off, e.g. for tests or if Bright Data is slow on stage."""
+    STATE["lookups"] = mode == "on"
+    log("scout", f"Web lookups turned {'on' if STATE['lookups'] else 'off'}.")
+    return {"lookups": STATE["lookups"]}
+
+
 @app.post("/api/midnight")
 async def post_midnight():
     return await midnight()
@@ -344,7 +359,7 @@ async def forget_person(pid: str):
     if not p:
         raise HTTPException(404, "unknown person")
     async with WRITE_LOCK:
-        removed = await memory.forget_person(p["content_hashes"])
+        removed = await memory.forget_person(p["content_hashes"], p["name"])  # column holds Cognee data ids
     LED.delete_person(pid)
     log("forget", f"Forgot {p['name']} on request ({removed} memory document(s) deleted).")
     return {"forgotten": p["name"], "documents": removed}
@@ -365,7 +380,7 @@ async def state():
         "met_tonight": len([p for p in people if p["event_id"] == EVENT_ID]),
         "people": people, "promises": promises, "drafts": LED.drafts(),
         "breakdown": LED.get("breakdown"), "watch": LED.get("watch"), "log": LOG,
-        "scout_ready": scout.ready(), "setup": {k: LED.get(k) for k in ("me_loaded", "backfill_loaded", "room_loaded")},
+        "scout_ready": scout.ready() and STATE["lookups"], "setup": {k: LED.get(k) for k in ("me_loaded", "backfill_loaded", "room_loaded")},
     }
 
 
@@ -397,6 +412,8 @@ async def clock():
 
 @app.on_event("startup")
 async def start_clock():
+    global MAIN_LOOP
+    MAIN_LOOP = asyncio.get_running_loop()
     asyncio.create_task(clock())
     log("start", f"Room Read up. {len(STATE['guests'])} people in tonight's room; {len(LED.people())} people in memory.")
 

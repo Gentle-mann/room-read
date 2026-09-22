@@ -86,7 +86,7 @@ class Sanitizer(HookProvider):
 
 
 class Job(BaseModel):
-    company: str
+    company: str | None = None
     title: str | None = None
     start: str | None = None
     end: str | None = None
@@ -99,7 +99,7 @@ class ScoutReport(BaseModel):
     headline: str | None = None
     current_company: str | None = None
     past_companies: list[Job] = Field(default_factory=list, description="Only employers that appear in tool results")
-    education: list[str] = Field(default_factory=list)
+    education: list[str] = Field(default_factory=list, description="Plain strings like 'University Name (2014–2019)'")
     city: str | None = None
     notes: str = Field(description="What was checked, and what could not be verified")
 

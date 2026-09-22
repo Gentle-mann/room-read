@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from strands import Agent, ToolContext, tool
 
 from app import memory
-from app.brain import UNTRUSTED, Card
+from app.brain import STYLE, UNTRUSTED, Card
 from app.config import EVENT_ID, EVENT_NAME, ME_DATASET, PEOPLE_DATASET, ROOM_DATASET, make_model, now
 from app.guard import Audit, Guardrail
 from app.guests import resolve
@@ -55,7 +55,7 @@ Call recall_memory(scope="me") once to learn my ranked goals, offers and stories
 
 Then return a card per person: reasons ranked by MY goals, each with an honest source label
 ("tonight" = what I said, "memory" = earlier meetings, "their Luma profile", "my notes"), and a short follow-up draft in my voice.
-Never invent facts. {untrusted}"""
+Never invent facts. {style} {untrusted}"""
 
 
 def build_agent(run: DebriefRun) -> Agent:
@@ -118,7 +118,7 @@ def build_agent(run: DebriefRun) -> Agent:
         callback_handler=None,
         tools=[resolve_person, recall_memory, remember_meeting, set_promise_timer, web_lookup],
         hooks=[Guardrail(run.log, met_ids=lambda: set(run.met)), Audit(run.log, "debrief agent")],
-        system_prompt=SYSTEM.format(event=EVENT_NAME, now=run.at.isoformat(), untrusted=UNTRUSTED),
+        system_prompt=SYSTEM.format(event=EVENT_NAME, now=run.at.isoformat(), style=STYLE, untrusted=UNTRUSTED),
     )
 
 
