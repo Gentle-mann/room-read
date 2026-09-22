@@ -4,6 +4,7 @@ Run:  .venv/bin/uvicorn app.server:app --host 0.0.0.0 --port 8765
 """
 
 import asyncio
+import json
 import os
 import re
 import uuid
@@ -403,9 +404,27 @@ async def forget_person(pid: str):
     return {"forgotten": p["name"], "documents": removed}
 
 
+# ---------- stage mode: only consenting people are named in full ----------
+def stage_mask(payload: dict) -> dict:
+    """Rewrite every full name to "First L." except people who agreed to be on stage and the hosts."""
+    allowed = {n.strip().lower() for n in os.getenv("STAGE_OK", "").split(",") if n.strip()} | {h.lower() for h in HOSTS}
+    names = {p["name"] for p in LED.people()} | {p["name"] for p in (LED.get("breakdown") or {}).get("picks", [])}
+    text = json.dumps(payload, ensure_ascii=False)
+    for full in sorted(names, key=len, reverse=True):
+        parts = full.split()
+        if len(parts) > 1 and full.lower() not in allowed:
+            text = text.replace(full, f"{parts[0]} {parts[-1][0]}.")
+    return json.loads(text)
+
+
 # ---------- read side ----------
 @app.get("/api/state")
-async def state():
+async def state(stage: int = 0):
+    data = await _state()
+    return stage_mask(data) if stage else data
+
+
+async def _state():
     t = now()
     promises = [dict(p, overdue=p["status"] == "open" and p["due_at"] < t.isoformat()) for p in LED.promises()]
     people = []
@@ -431,7 +450,7 @@ async def graph(dataset: str = "people"):
 
 
 @app.get("/api/map")
-async def relationship_map(cognee: int = 0):
+async def relationship_map(cognee: int = 0, stage: int = 0):
     """Nodes and labeled edges for the map page; ?cognee=1 overlays what Cognee extracted."""
     m = mapview.build(LED, LED.get("watch"))
     facts, error = 0, None
@@ -440,7 +459,8 @@ async def relationship_map(cognee: int = 0):
             facts = await mapview.add_cognee_layer(m)
         except Exception as e:  # noqa: BLE001 - the map still works without the overlay
             error = f"Cognee layer unavailable ({type(e).__name__})"
-    return {"nodes": list(m.nodes.values()), "edges": m.edges, "cognee_facts": facts, "error": error}
+    out = {"nodes": list(m.nodes.values()), "edges": m.edges, "cognee_facts": facts, "error": error}
+    return stage_mask(out) if stage else out
 
 
 @app.get("/map")

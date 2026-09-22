@@ -93,7 +93,7 @@
       <button data-act="/api/watch">Check for changes</button>
       <button data-act="/api/morning">Next-morning drafts</button>
       <button data-act="/api/midnight">Fast-forward to midnight</button>
-      <a href="/map"><button>Open map</button></a>
+      <a href="/map" onclick="if (STAGE) this.href = '/map?stage=1'"><button>Open map</button></a>
       <a href="/api/graph" target="_blank" class="mute" style="font-size:13px">raw Cognee graph</a>
     </div>
     <div class="mute" style="margin-top:8px">Midnight also runs on its own. Drafts are never sent.</div>
@@ -103,6 +103,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 let lastLog = "";
+const STAGE = new URLSearchParams(location.search).get("stage") === "1";
 
 async function api(path, body) {
   const r = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -184,9 +185,9 @@ function renderLog(log) {
 
 async function refresh() {
   try {
-    const s = await api("/api/state");
+    const s = await api("/api/state" + (STAGE ? "?stage=1" : ""));
     const forgot = s.event.room_forgotten_at ? " · room forgotten" : "";
-    $("sub").textContent = `${s.event.name} · ${s.event.room_size} in the room · ${s.met_tonight} met tonight${forgot}${s.scout_ready ? "" : " · web lookups off"}`;
+    $("sub").textContent = `${STAGE ? "Stage mode · " : ""}${s.event.name} · ${s.event.room_size} in the room · ${s.met_tonight} met tonight${forgot}${s.scout_ready ? "" : " · web lookups off"}`;
     renderPeople(s.people); renderPromises(s.promises); renderPlan(s.breakdown); renderChanged(s.watch); renderLog(s.log);
   } catch (e) { $("sub").textContent = "Server not reachable"; }
 }

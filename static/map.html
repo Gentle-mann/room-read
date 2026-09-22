@@ -37,7 +37,7 @@
 <body>
 <header>
   <h1>Your memory, as a map</h1>
-  <a href="/">← Back to Room Read</a>
+  <a href="/" onclick="if (location.search.includes('stage=1')) this.href='/?stage=1'">← Back to Room Read</a>
   <span class="empty" id="stats"></span>
 </header>
 <div class="explain">
@@ -94,7 +94,8 @@ let data = null, network = null, nodesDS = null, edgesDS = null;
 async function load() {
   const withCognee = document.getElementById("t-cognee").checked;
   document.getElementById("stats").textContent = withCognee ? "Loading Cognee's facts…" : "";
-  data = await (await fetch(`/api/map${withCognee ? "?cognee=1" : ""}`)).json();
+  const stage = new URLSearchParams(location.search).get("stage") === "1";
+  data = await (await fetch(`/api/map?cognee=${withCognee ? 1 : 0}&stage=${stage ? 1 : 0}`)).json();
   const people = data.nodes.filter((n) => n.group.startsWith("met")).length;
   document.getElementById("stats").textContent = `${people} people · ${data.edges.length} connections` + (withCognee ? ` · ${data.cognee_facts} facts from Cognee` : "") + (data.error ? ` · ${data.error}` : "");
   draw();
